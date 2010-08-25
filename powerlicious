@@ -1,0 +1,163 @@
+#!/usr/bin/env perl
+use strict;
+use warnings;
+use Mojolicious::Lite;
+use Net::Telnet;
+
+use constant TABLE_SEP =>
+    "-----+------------------+---------+------------+------------------+---------+\n";
+use constant NPS_HOST => 'nps';
+use constant NPS_PROMPT => '/NPS> $/';
+
+use Data::Dumper;
+
+# “We’ve lost power of the forward Gameboy! Mario not responding!”
+
+
+my %action_map =
+(
+    'on' => 'on',
+    'off' => 'off',
+);
+
+get '/' => sub
+{
+    my $self = shift;
+
+    $self->render( _status() );
+
+} => 'index';
+
+get '/:action/:value' => sub
+{
+    my $self = shift;
+    my $action = $self->stash('action');
+    my $value = $self->stash('value');
+
+
+    _action($action, $value);
+    $self->redirect_to('index');
+
+} => 'action';
+
+# Static file delivery
+
+get '/static/(*path)' => sub
+{
+    app->static; # ->prefix('/static/');
+} => 'static';
+# --- 
+
+sub _action
+{
+    my $q = shift;
+    my $value = shift;
+    my $action = $action_map{ $q } or die "invalid action: $q";
+    $value =~ s/[^a-zA-Z0-9]//; # simple input sanitization
+
+    return _nps('/' . $action . ' '. $value);
+}
+
+sub _status
+{
+    my @status_raw = _nps('/s') or die "could not read status: $!";
+    my @plugs;
+
+    # romove until TABLE_SEP;
+    while (my $l = shift @status_raw)
+    {
+        last if $l eq TABLE_SEP
+    }
+
+    for my $line (@status_raw)
+    {
+
+        # were done if TABLE_SEP is reached
+        app->log->debug($line);
+        last if $line eq TABLE_SEP;
+
+        $line =~ s/^\s*//;
+        my ($num, $name, $status, $delay, $password, $default) 
+            = split /\s*\|\s*/, $line;
+        push @plugs,
+        {
+            num => $num,
+            name => $name,
+            status => $status,
+            delay => $delay,
+            password => $password,
+            default => $default
+        };
+    }
+    return(plugs => \@plugs);
+}
+
+sub _nps
+{
+    my $command = shift;
+    my $telnet = Net::Telnet->new(Prompt => NPS_PROMPT);
+    $telnet->open(NPS_HOST);
+    my @ret = $telnet->cmd($command);
+    $telnet->cmd('/x');
+
+    return @ret;
+}
+
+
+app->start;
+
+__DATA__
+
+@@ index.html.ep
+% layout 'default';
+<%= include "plugs" %>
+
+
+@@ plugs.html.ep
+    <div id="collection" class="draggable">
+        <h1>Plugs</h1>
+        <table>
+            <tr><th>Plug</th><th>Name</th><th>Status</th><th>Action</th></tr>
+% for my $plug (@$plugs) {
+            <tr>
+                <td><%= $plug->{num} %></td><td><%= $plug->{name} %></td>
+                <td><%= $plug->{status} %></td>
+                <td>
+                    <a href="<%= url_for('action', action => 'on', value => $plug->{num}) %>">on</a>
+                    <a href="<%= url_for('action', action => 'off', value => $plug->{num}) %>">off</a>
+                </td>
+            </tr>
+% }
+        </table>
+    </div>
+
+@@ layouts/default.html.ep
+<!doctype html>
+<head>
+ <meta charset="utf-8">
+ <title>powerlicious</title>
+ <style type="text/css">
+<!--
+    a { color: white; }
+    a:hover { color: DeepPink; }
+    html { background-color: black; color: white; }
+
+    h1,h2 { color: gold; }
+-->
+ </style>
+<body>
+    <%== content %>
+    <br />
+    <pre><div id="debug"></div></pre>
+</body>
+</html>
+
+
+
+@@ exception.html.ep
+<!doctype html>
+<html>
+    <head><title>Error</title></head>
+    <body><h2>Error</h2></body>
+</html>
+
