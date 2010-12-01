@@ -1,6 +1,7 @@
 #!/usr/bin/env perl
 use strict;
 use warnings;
+
 use Mojolicious::Lite;
 use Net::Telnet;
 
@@ -9,6 +10,7 @@ use constant TABLE_SEP =>
 use constant NPS_HOST => 'nps';
 use constant NPS_PROMPT => '/NPS> $/';
 use constant MAX_TRIES => 3;
+use constant DISABLE => ( 1 );
 
 use Data::Dumper;
 
@@ -33,13 +35,13 @@ get '/' => sub
     $self->render( _status() );
 } => 'index';
 
-get '/:action/:value' => sub
+get '/:action/:plug' => sub
 {
     my $self = shift;
+    my $plug = $self->stash('plug');
     my $action = $self->stash('action');
-    my $value = $self->stash('value');
 
-    _action($action, $value);
+    _action($action, $plug);
 
     $self->redirect_to('index');
 
@@ -59,12 +61,14 @@ get '/static/(*path)' => sub
 sub _action
 {
     my $q = shift;
-    my $value = shift;
+    my $plug = shift;
     
     my $action = $action_map{ $q } or die "invalid action: $q";
-    $value =~ s/[^a-zA-Z0-9]//; # simple input sanitization
+    $plug =~ s/[^0-9]//; # simple input sanitization
 
-    return _nps('/' . $action . ' '. $value);
+    for (DISABLE) { die 'plug disabled' if  $_ == $plug };
+
+    return _nps('/' . $action . ' '. $plug);
 }
 
 sub _status
@@ -78,7 +82,7 @@ sub _status
         last if $l eq TABLE_SEP
     }
 
-    for my $line (@status_raw)
+    LINE: for my $line (@status_raw)
     {
 
         # were done if TABLE_SEP is reached
@@ -88,6 +92,9 @@ sub _status
         $line =~ s/^\s*//;
         my ($num, $name, $status, $delay, $password, $default) 
             = split /\s*\|\s*/, $line;
+
+        for (DISABLE) { app->log->debug("is $_ == $num?"); next LINE if $_ == $num }
+
         push @plugs,
         {
             num => $num,
@@ -145,8 +152,8 @@ __DATA__
                 <td><%= $plug->{num} %></td><td><%= $plug->{name} %></td>
                 <td><%= $plug->{status} %></td>
                 <td>
-                    <a href="<%= url_for('action', action => 'on', value => $plug->{num}) %>">on</a>
-                    <a href="<%= url_for('action', action => 'off', value => $plug->{num}) %>">off</a>
+                    <a href="<%= url_for('action', action => 'on', plug => $plug->{num}) %>">on</a>
+                    <a href="<%= url_for('action', action => 'off', plug => $plug->{num}) %>">off</a>
                 </td>
             </tr>
 % }
