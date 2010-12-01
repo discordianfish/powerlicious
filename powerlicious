@@ -8,6 +8,7 @@ use constant TABLE_SEP =>
     "-----+------------------+---------+------------+------------------+---------+\n";
 use constant NPS_HOST => 'nps';
 use constant NPS_PROMPT => '/NPS> $/';
+use constant MAX_TRIES => 3;
 
 use Data::Dumper;
 
@@ -20,12 +21,16 @@ my %action_map =
     'off' => 'off',
 );
 
+my $telnet = Net::Telnet->new(Prompt => NPS_PROMPT);
+$telnet->open(NPS_HOST);
+$telnet->waitfor(NPS_PROMPT);
+
+$SIG{INT} = sub { $telnet->cmd('/x') };
+
 get '/' => sub
 {
     my $self = shift;
-
     $self->render( _status() );
-
 } => 'index';
 
 get '/:action/:value' => sub
@@ -34,24 +39,28 @@ get '/:action/:value' => sub
     my $action = $self->stash('action');
     my $value = $self->stash('value');
 
-
     _action($action, $value);
+
     $self->redirect_to('index');
 
 } => 'action';
+
 
 # Static file delivery
 
 get '/static/(*path)' => sub
 {
-    app->static; # ->prefix('/static/');
+    app->static;
 } => 'static';
+
+
 # --- 
 
 sub _action
 {
     my $q = shift;
     my $value = shift;
+    
     my $action = $action_map{ $q } or die "invalid action: $q";
     $value =~ s/[^a-zA-Z0-9]//; # simple input sanitization
 
@@ -63,7 +72,7 @@ sub _status
     my @status_raw = _nps('/s') or die "could not read status: $!";
     my @plugs;
 
-    # romove until TABLE_SEP;
+    # remove until TABLE_SEP;
     while (my $l = shift @status_raw)
     {
         last if $l eq TABLE_SEP
@@ -95,12 +104,25 @@ sub _status
 sub _nps
 {
     my $command = shift;
-    my $telnet = Net::Telnet->new(Prompt => NPS_PROMPT);
-    $telnet->open(NPS_HOST);
-    my @ret = $telnet->cmd($command);
-    $telnet->cmd('/x');
 
-    return @ret;
+    my $reopend;
+    my $tries;
+    do
+    {
+        my @ret = $telnet->cmd($command);
+        app->log->debug("CMD>$command<DMC PROMPT: " . $telnet->last_prompt . "\n\n\n". Dumper(@ret));
+        return @ret if @ret;
+
+        if ($telnet->errmsg)
+        {
+            $telnet->open(NPS_HOST);
+            next unless $reopend;
+            $reopend = 1;
+        }
+        sleep 1;
+    } while $tries++ < MAX_TRIES;
+
+    die 'could not send cmd to telnetd';
 }
 
 
