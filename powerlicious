@@ -11,6 +11,16 @@ use constant NPS_HOST => 'nps';
 use constant NPS_PROMPT => '/NPS> $/';
 use constant MAX_TRIES => 10;
 use constant DISABLE => ( 1 );
+use constant PRESET => 
+{
+    'Swag' =>  [ 3, 4, 5, 7, 8 ],
+    'Party' => [ 3, 4, 5, 8 ],
+    'Cozy' => [ 7 ],
+    'Stoned' => [ 4, 5 ],
+    'too stoned' => [ 4 ],
+    'all off' => [ ],
+};
+use constant NUM_PLUGS => 8;
 
 use Data::Dumper;
 
@@ -21,32 +31,65 @@ my %action_map =
 (
     'on' => 'on',
     'off' => 'off',
+
 );
 
 my $telnet = Net::Telnet->new(Prompt => NPS_PROMPT, Errmode => 'return');
-$telnet->open(NPS_HOST);
-$telnet->waitfor(NPS_PROMPT);
-
-$SIG{INT} = sub { $telnet->cmd('/x') };
+my $open;
+$SIG{INT} = sub { $telnet->cmd('/x'); exit };
 
 get '/' => sub
 {
     my $self = shift;
-    $self->render( _status() );
+    $self->render( _status(), preset => PRESET);
 } => 'index';
+
+get '/preset/:name' => sub
+{
+    my $self = shift;
+
+    my $list = (PRESET)->{$self->stash('name')}
+        or die 'invalid preset';
+
+    my %status = _status();
+    for my $plug (@{ $status{plugs} })
+    {
+        app->log->debug($plug->{num});
+        if (grep { $plug->{num} eq $_ } @$list)
+        {
+            app->log->debug($plug->{num} . ' should be turned on');
+            
+            _nps('/on ' . $plug->{num})
+                if $plug->{status} eq 'OFF';
+        } else
+        {
+            app->log->debug($plug->{num} . ' should be turned off');
+            _nps('/off ' . $plug->{num})
+                if $plug->{status} eq 'ON';
+        }
+    }
+    
+    $self->redirect_to('index');
+
+} => 'preset';
+
 
 get '/:action/:plug' => sub
 {
     my $self = shift;
     my $plug = $self->stash('plug');
-    my $action = $self->stash('action');
+    my $q = $self->stash('action');
 
-    _action($action, $plug);
+    my $action = $action_map{ $q } or die "invalid action: $q";
+    $plug =~ s/[^0-9]//; # simple input sanitization
+
+    for (DISABLE) { die 'plug disabled' if  $_ == $plug };
+
+    _nps('/' . $action . ' '. $plug);
 
     $self->redirect_to('index');
 
 } => 'action';
-
 
 # Static file delivery
 
@@ -57,19 +100,6 @@ get '/static/(*path)' => sub
 
 
 # --- 
-
-sub _action
-{
-    my $q = shift;
-    my $plug = shift;
-    
-    my $action = $action_map{ $q } or die "invalid action: $q";
-    $plug =~ s/[^0-9]//; # simple input sanitization
-
-    for (DISABLE) { die 'plug disabled' if  $_ == $plug };
-
-    return _nps('/' . $action . ' '. $plug);
-}
 
 sub _status
 {
@@ -115,13 +145,20 @@ sub _nps
     my $tries;
     while ($tries++ < MAX_TRIES)
     {
+        unless ($open)
+        {
+            $telnet->open(NPS_HOST);
+            $telnet->waitfor(NPS_PROMPT);
+            $open = 1;
+        }
+
         my @ret = $telnet->cmd($command);
         app->log->debug("-- $command --: " . $telnet->last_prompt . "\n". Dumper(@ret));
         return @ret if @ret;
 
         $telnet->close;
+        undef $open;
         sleep 1;
-        $telnet->open(NPS_HOST);
     }
     die 'could not send cmd to telnetd';
 }
@@ -133,26 +170,31 @@ __DATA__
 
 @@ index.html.ep
 % layout 'default';
-<%= include "plugs" %>
+<%= include 'plugs' %>
+<%= include 'presets' %>
 
 
 @@ plugs.html.ep
-    <div id="collection" class="draggable">
-        <h1>Plugs</h1>
-        <table id="plugs">
-            <tr><th>Plug</th><th>Name</th><th>Status</th><th>Action</th></tr>
-% for my $plug (@$plugs) {
-            <tr>
-                <td><%= $plug->{num} %></td><td><%= $plug->{name} %></td>
-                <td><%= $plug->{status} %></td>
-                <td>
-                    <a href="<%= url_for('action', action => 'on', plug => $plug->{num}) %>">on</a>
-                    <a href="<%= url_for('action', action => 'off', plug => $plug->{num}) %>">off</a>
-                </td>
-            </tr>
-% }
-        </table>
-    </div>
+<div id="plugs">
+    <h1>Plugs</h1>
+%   for my $plug (@$plugs) {
+%       if ($plug->{status} eq 'ON') {
+            <a class='on' href="<%= url_for('action', action => 'off', plug => $plug->{num}) %>">
+%       } else {
+            <a class='off' href="<%= url_for('action', action => 'on', plug => $plug->{num}) %>">
+%       }       
+        <span><%= $plug->{num} %>. <%= $plug->{name} %></span>
+        </a>
+%   }
+</div>
+
+@@ presets.html.ep
+<div id='presets'>
+    <h1>Presets</h1>
+%   for my $preset (keys %$preset) {
+        <a href="<%= url_for 'preset', name => $preset %>"><span><%= $preset %></span></a>
+%   }
+</div>
 
 @@ layouts/default.html.ep
 <!doctype html>
@@ -161,17 +203,27 @@ __DATA__
  <title>powerlicious</title>
  <style type="text/css">
 <!--
-    a { color: white }
-    a:hover { color: DeepPink }
-    html { background-color: black; color: white }
+    a { text-decoration: none; color: #ddd }
+    a.on { color: #eee }
+    a.off { color: #555 }
+    a:hover { color: white }
+    html
+    {
+        background-color: black;
+        color: white;
+        font-size: 200%;
 
+    }
+    #content { width: 20em; padding-left: 1em }
     h1,h2 { color: gold }
+    span { display: block }
+    span:hover { background-color: #555 }
+
+
 -->
  </style>
 <body>
-    <%== content %>
-    <br />
-    <pre><div id="debug"></div></pre>
+    <div id="content"><%== content %></div>
 </body>
 </html>
 
@@ -183,4 +235,3 @@ __DATA__
     <head><title>Error</title></head>
     <body><h2>Error</h2></body>
 </html>
-
