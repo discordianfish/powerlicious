@@ -9,7 +9,7 @@ use constant TABLE_SEP =>
     "-----+------------------+---------+------------+------------------+---------+\n";
 use constant NPS_HOST => 'nps';
 use constant NPS_PROMPT => '/NPS> $/';
-use constant MAX_TRIES => 3;
+use constant MAX_TRIES => 10;
 use constant DISABLE => ( 1 );
 
 use Data::Dumper;
@@ -23,7 +23,7 @@ my %action_map =
     'off' => 'off',
 );
 
-my $telnet = Net::Telnet->new(Prompt => NPS_PROMPT);
+my $telnet = Net::Telnet->new(Prompt => NPS_PROMPT, Errmode => 'return');
 $telnet->open(NPS_HOST);
 $telnet->waitfor(NPS_PROMPT);
 
@@ -112,23 +112,17 @@ sub _nps
 {
     my $command = shift;
 
-    my $reopend;
     my $tries;
-    do
+    while ($tries++ < MAX_TRIES)
     {
         my @ret = $telnet->cmd($command);
-        app->log->debug("CMD>$command<DMC PROMPT: " . $telnet->last_prompt . "\n\n\n". Dumper(@ret));
+        app->log->debug("-- $command --: " . $telnet->last_prompt . "\n". Dumper(@ret));
         return @ret if @ret;
 
-        if ($telnet->errmsg)
-        {
-            $telnet->open(NPS_HOST);
-            next unless $reopend;
-            $reopend = 1;
-        }
+        $telnet->close;
         sleep 1;
-    } while $tries++ < MAX_TRIES;
-
+        $telnet->open(NPS_HOST);
+    }
     die 'could not send cmd to telnetd';
 }
 
@@ -145,7 +139,7 @@ __DATA__
 @@ plugs.html.ep
     <div id="collection" class="draggable">
         <h1>Plugs</h1>
-        <table>
+        <table id="plugs">
             <tr><th>Plug</th><th>Name</th><th>Status</th><th>Action</th></tr>
 % for my $plug (@$plugs) {
             <tr>
@@ -167,11 +161,11 @@ __DATA__
  <title>powerlicious</title>
  <style type="text/css">
 <!--
-    a { color: white; }
-    a:hover { color: DeepPink; }
-    html { background-color: black; color: white; }
+    a { color: white }
+    a:hover { color: DeepPink }
+    html { background-color: black; color: white }
 
-    h1,h2 { color: gold; }
+    h1,h2 { color: gold }
 -->
  </style>
 <body>
