@@ -34,9 +34,11 @@ my %action_map =
 
 );
 
-my $telnet = Net::Telnet->new(Prompt => NPS_PROMPT, Errmode => 'return');
+my $telnet = Net::Telnet->new(Prompt => NPS_PROMPT, Errmode => 'die');
 my $open;
+
 $SIG{INT} = sub { $telnet->cmd('/x'); exit };
+$SIG{PIPE} = sub { die "broken pipe: $!" };
 
 get '/' => sub
 {
@@ -147,16 +149,27 @@ sub _nps
     {
         unless ($open)
         {
-            app->log->debug("connection closed, reopening");
-            $telnet->open(NPS_HOST);
-            $telnet->waitfor(NPS_PROMPT);
+            app->log->debug('connection closed, reopening');
+            eval {
+                $telnet->open(NPS_HOST);
+                $telnet->waitfor(NPS_PROMPT);
+            };
+            if ($@)
+            {
+                app->log->warn("could not reopen connection: $@");
+                next; # immediately retry
+            }
             $open = 1;
         }
 
-        my @ret = $telnet->cmd($command);
-        app->log->debug("$tries: -- $command --: " . $telnet->last_prompt . "\n". Dumper(@ret));
-        return @ret if @ret;
+        my @ret = eval { $telnet->cmd($command) };
+        unless ($@)
+        {
+            app->log->debug("$tries: -- $command --: " . $telnet->last_prompt . "\n". Dumper(@ret));
+            return @ret if @ret;
+        }
 
+        app->log->warn("could not send command($command): $@");
         $telnet->close;
         undef $open;
         sleep 1;
