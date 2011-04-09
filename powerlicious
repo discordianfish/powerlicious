@@ -147,13 +147,14 @@ sub _nps
     {
         unless ($open)
         {
+            app->log->debug("connection closed, reopening");
             $telnet->open(NPS_HOST);
             $telnet->waitfor(NPS_PROMPT);
             $open = 1;
         }
 
         my @ret = $telnet->cmd($command);
-        app->log->debug("-- $command --: " . $telnet->last_prompt . "\n". Dumper(@ret));
+        app->log->debug("$tries: -- $command --: " . $telnet->last_prompt . "\n". Dumper(@ret));
         return @ret if @ret;
 
         $telnet->close;
