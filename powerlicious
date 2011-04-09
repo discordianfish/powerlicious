@@ -191,29 +191,34 @@ __DATA__
 @@ plugs.html.ep
 <div id="plugs">
     <h1>Plugs</h1>
+    <div class="item">
 %   for my $plug (@$plugs) {
 %       if ($plug->{status} eq 'ON') {
             <a class='on' href="<%= url_for('action', action => 'off', plug => $plug->{num}) %>">
 %       } else {
             <a class='off' href="<%= url_for('action', action => 'on', plug => $plug->{num}) %>">
 %       }       
-        <span><%= $plug->{num} %>. <%= $plug->{name} %></span>
+        <span><%= $plug->{name} %></span>
         </a>
 %   }
+    </div>
 </div>
 
 @@ presets.html.ep
 <div id='presets'>
     <h1>Presets</h1>
+    <div class="item">
 %   for my $preset (keys %$preset) {
         <a href="<%= url_for 'preset', name => $preset %>"><span><%= $preset %></span></a>
 %   }
+    </div>
 </div>
 
 @@ layouts/default.html.ep
 <!doctype html>
 <head>
  <meta charset="utf-8">
+ <meta name="viewport" content="target-densitydpi=low-dpi" />
  <title>powerlicious</title>
  <style type="text/css">
 <!--
@@ -225,13 +230,13 @@ __DATA__
     {
         background-color: black;
         color: white;
-        font-size: 200%;
-
     }
-    #content { width: 20em; padding-left: 1em }
+    #content { min-width: 20em }
     h1,h2 { color: gold }
-    span { display: block }
-    span:hover { background-color: #555 }
+    .item { font-size: 64pt }
+    .item span { display: block; padding-left: 1em }
+    .item span:hover { background-color: #555 }
+    .item span:active { background-color: #555 }
 
 
 -->
